@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>減数報告管理システム</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background-color: #f0f2f5; color: #333; padding-top: 120px; } 
+    h1 { text-align: center; color: #2c3e50; }
+    .category-section { margin-bottom: 50px; border-top: 4px solid #333; padding-top: 20px; }
+    .category-title { font-size: 1.3rem; margin-bottom: 15px; background: #eee; padding: 10px; border-radius: 4px; text-align: center; }
+    
+    .sub-category-header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      background: #d5dbdb; 
+      padding: 10px 15px; 
+      margin: 30px 0 15px 0; 
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .sub-btn-group { display: flex; gap: 10px; }
+    .sub-btn { padding: 5px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.8rem; }
+    .calc-weight-btn { background: #8e44ad; } 
+    .calc-open-btn { background: #d35400; }
+    .calc-extract-btn { background: #2980b9; } 
+
+    section { margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    h2 { font-size: 1rem; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; padding-left: 10px; border-left: 5px solid #ccc; }
+    .border-green { border-left-color: #2ecc71 !important; }
+    .border-orange { border-left-color: #e67e22 !important; }
+    .label { padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; color: white; }
+    .background-green { background: #2ecc71; }
+    .background-orange { background: #e67e22; }
+    .background-blue { background: #3498db; margin-right: 5px; }
+    .table-container { width: 100%; overflow-x: auto; border: 1px solid #ddd; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; font-size: 0.75rem; }
+    th { background-color: #f8f9fa; position: sticky; top: 0; }
+    td:first-child { background-color: #f9f9f9; color: #666; font-weight: bold; width: 30px; }
+
+    .selected-cell {
+      outline: 2px solid #3498db !important;
+      background-color: #d1e7ff !important;
+    }
+
+    #action-control-panel {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: white; padding: 15px; border-bottom: 2px solid #ddd;
+      display: flex; gap: 8px; align-items: center; justify-content: center;
+      z-index: 9999; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      flex-wrap: wrap;
+    }
+    .panel-btn { padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer; font-weight: bold; font-size: 0.85rem; }
+    .add-btn { background: #27ae60; } 
+    .paste-btn { background: #f39c12; }
+    .delete-btn { background: #c0392b; }
+    .save-btn { background: #3498db; }
+    .load-btn { background: #2ecc71; }
+    .clear-btn { background: #e74c3c; }
+    .json-save-btn { background: #2c3e50; }
+    .json-load-btn { background: #95a5a6; }
+    .people-input { width: 50px; padding: 5px; }
+  </style>
+</head>
+<body>
+
+  <div id="action-control-panel">
+    <button id="btn-add-row" class="panel-btn add-btn">行追加</button>
+    <button id="btn-paste" class="panel-btn paste-btn">貼り付け</button>
+    <button id="btn-delete" class="panel-btn delete-btn">行削除</button>
+    <div style="border-left: 1px solid #ccc; height: 25px; margin: 0 5px;"></div>
+    <button id="btn-save" class="panel-btn save-btn">一時保存</button>
+    <button id="btn-load" class="panel-btn load-btn">保存から復元</button>
+    <button id="btn-json-export" class="panel-btn json-save-btn">JSON保存</button>
+    <button id="btn-json-import-trigger" class="panel-btn json-load-btn">JSON読込</button>
+    <button id="btn-clear" class="panel-btn clear-btn">全消去</button>
+    <input type="file" id="input-json-file" style="display:none;" accept=".json">
+    <div style="margin-left: 10px; font-size: 0.85rem;">
+      学1: <input type="number" id="input-people-s1" class="people-input" value="1"> 人
+      学2: <input type="number" id="input-people-s2" class="people-input" value="1"> 人
+    </div>
+  </div>
+
+  <h1>減数報告管理システム</h1>
+  <div id="main-content"></div>
+
+  <script>
+    window.addEventListener('load', function() {
+      const mainContentArea = document.getElementById('main-content');
+      let lastActiveCell = null;
+
+      function disableNewLine(event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.target.blur();
+        }
+      }
+
+      function createBlankRow(targetTable, colCount = null) {
+        const tr = document.createElement('tr');
+        const totalColumnCount = colCount || targetTable.rows[0].cells.length;
+        for (let i = 0; i < totalColumnCount; i++) {
+          const td = document.createElement('td');
+          if (i === 0) {
+            td.setAttribute('contenteditable', 'false');
+          } else {
+            td.setAttribute('contenteditable', 'true');
+            td.addEventListener('keydown', disableNewLine);
+          }
+          tr.appendChild(td);
+        }
+        return tr;
+      }
+
+      function renumberTable(tableBody) {
+        Array.from(tableBody.rows).forEach((row, index) => {
+          row.cells[0].textContent = index + 1;
+        });
+      }
+
+      function createCategoryWrapper(titleText) {
+        const wrapperDiv = document.createElement('div');
+        wrapperDiv.className = 'category-section';
+        wrapperDiv.innerHTML = `<div class="category-title">${titleText}</div>`;
+        return wrapperDiv;
+      }
+
+      function buildTableSet(tableName, schoolName, labelColorClass, borderColorClass, columnList, tableIdName) {
+        const tableSection = document.createElement('section');
+        const headerTitle = document.createElement('h2');
+        headerTitle.className = borderColorClass;
+        headerTitle.innerHTML = `<span>${tableName}</span><span><span class="label ${labelColorClass}">${schoolName}</span></span>`;
+        
+        const scrollContainer = document.createElement('div');
+        scrollContainer.className = 'table-container';
+        const tableElement = document.createElement('table');
+        tableElement.id = tableIdName;
+        const tableHead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        const tableBody = document.createElement('tbody');
+
+        const fullColumnList = ['No.', ...columnList];
+        fullColumnList.forEach(function(columnName) {
+          const headerCell = document.createElement('th');
+          headerCell.textContent = columnName;
+          headerRow.appendChild(headerCell);
+        });
+
+        const firstDataRow = createBlankRow(null, fullColumnList.length);
+        firstDataRow.cells[0].textContent = '1';
+        tableBody.appendChild(firstDataRow);
+
+        tableHead.appendChild(headerRow);
+        tableElement.appendChild(tableHead);
+        tableElement.appendChild(tableBody);
+        scrollContainer.appendChild(tableElement);
+        tableSection.appendChild(headerTitle);
+        tableSection.appendChild(scrollContainer);
+
+        tableBody.addEventListener('click', function(e) {
+          const cell = e.target.closest('td');
+          if (!cell) return;
+          if (lastActiveCell) lastActiveCell.classList.remove('selected-cell');
+          lastActiveCell = cell;
+          lastActiveCell.classList.add('selected-cell');
+        });
+
+        return tableSection;
+      }
+
+      // --- テーブル構成定義 ---
+      const section1 = createCategoryWrapper("1. 減数報告3ヵ月前の在庫");
+      const inventoryColumns = ['食品番号', '食品名', '規格1(未開封)', '規格2(未開封)', '規格3(未開封)', '端数(g)'];
+      section1.appendChild(buildTableSet("在庫", "学校1", "background-green", "border-green", inventoryColumns, "inventory-school1"));
+      section1.appendChild(buildTableSet("在庫", "学校2", "background-orange", "border-orange", inventoryColumns, "inventory-school2"));
+      mainContentArea.appendChild(section1);
+
+      const section2 = createCategoryWrapper("2. ３カ月間使用量");
+      const dayNumbers = Array.from({length: 31}, (_, index) => index + 1);
+      const usageColumnsSingle = ['食品番号', '食品名', ...dayNumbers];
+      const usageColumnsTotal = ['食品番号', '食品名', ...dayNumbers, '最大納品数', '開封数', '在庫数', '在庫(端数g)'];
+
+      section2.appendChild(buildTableSet("使用量(1人分) 1か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month1-single"));
+      section2.appendChild(buildTableSet("使用量(1人分) 2か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month2-single"));
+      section2.appendChild(buildTableSet("使用量(1人分) 3か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month3-single"));
+      section2.appendChild(buildTableSet("使用量(1人分) 1か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month1-single"));
+      section2.appendChild(buildTableSet("開用量(1人分) 2か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month2-single"));
+      section2.appendChild(buildTableSet("使用量(1人分) 3か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month3-single"));
+
+      const subHeaderUsage = document.createElement('div');
+      subHeaderUsage.className = 'sub-category-header';
+      subHeaderUsage.innerHTML = `<span>３カ月間使用量(人数分)</span><div class="sub-btn-group"><button id="btn-calc-weight" class="sub-btn calc-weight-btn">重量計算のみ</button><button id="btn-calc-open" class="sub-btn calc-open-btn">開封計算実行</button></div>`;
+      section2.appendChild(subHeaderUsage);
+
+      section2.appendChild(buildTableSet("使用量(人数分) 1か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month1-total"));
+      section2.appendChild(buildTableSet("使用量(人数分) 2か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month2-total"));
+      section2.appendChild(buildTableSet("使用量(人数分) 3か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month3-total"));
+      section2.appendChild(buildTableSet("使用量(人数分) 1か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month1-total"));
+      section2.appendChild(buildTableSet("使用量(人数分) 2か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month2-total"));
+      section2.appendChild(buildTableSet("使用量(人数分) 3か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month3-total"));
+      mainContentArea.appendChild(section2);
+
+      const section3 = createCategoryWrapper("3. 食品減数データ");
+      const reductionColumns = ['食品番号', '食品名', '規格', '翌月減数', '翌月廃棄', '翌々月減数', '翌々月廃棄', '3ヶ月後減数', '3ヶ月後廃棄'];
+      section3.appendChild(buildTableSet("減数", "学校1", "background-green", "border-green", reductionColumns, "reduction-school1"));
+      section3.appendChild(buildTableSet("減数", "学校2", "background-orange", "border-orange", reductionColumns, "reduction-school2"));
+      mainContentArea.appendChild(section3);
+
+      const section5 = createCategoryWrapper("4. ３カ月間使い切り使用数抽出");
+      const dayHeadersLong = dayNumbers.map(n => n.toString());
+      const cutoffColumnsBase = ['食品番号', '食品名', '規格', ...dayHeadersLong, '最大納品数', '在庫予測'];
+      const cutoffColumnsWithOpening = ['食品番号', '食品名', '規格', ...dayHeadersLong, '開封数', '最大納品数', '在庫予測']; 
+
+      const subHeaderCutoff = document.createElement('div');
+      subHeaderCutoff.className = 'sub-category-header';
+      subHeaderCutoff.innerHTML = `<span>使い切りデータ抽出</span><div class="sub-btn-group"><button id="btn-calc-extract" class="sub-btn calc-extract-btn">使い切り抽出</button></div>`;
+      section5.appendChild(subHeaderCutoff);
+
+      section5.appendChild(buildTableSet("使い切り 1か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month1"));
+      section5.appendChild(buildTableSet("使い切り 2か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month2"));
+      section5.appendChild(buildTableSet("使い切り 3か月目", "学校1", "background-green", "border-green", cutoffColumnsWithOpening, "cutoff-school1-month3"));
+      section5.appendChild(buildTableSet("使い切り 1か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month1"));
+      section5.appendChild(buildTableSet("使い切り 2か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month2"));
+      section5.appendChild(buildTableSet("使い切り 3か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month3"));
+      mainContentArea.appendChild(section5);
+
+      const section6 = createCategoryWrapper("5. 食品DB");
+      const databaseColumns = ['食品番号', '食品名', '規格1', '規格2', '規格3', 'カテゴリー'];
+      section6.appendChild(buildTableSet("食品DB", "共通", "background-blue", "border-blue", databaseColumns, "food-database"));
+      mainContentArea.appendChild(section6);
+
+      // --- ボタンアクション ---
+
+      document.getElementById('btn-add-row').addEventListener('click', function() {
+        if (!lastActiveCell) return alert('追加先のテーブル内のセルを選択してください。');
+        const targetTable = lastActiveCell.closest('table');
+        const tbody = targetTable.querySelector('tbody');
+        const newRow = createBlankRow(targetTable);
+        lastActiveCell.parentElement.after(newRow);
+        renumberTable(tbody);
+      });
+
+      document.getElementById('btn-paste').addEventListener('click', async function() {
+        if (!lastActiveCell) return alert('貼り付け先のセルを選択してください。');
+        try {
+          const text = await navigator.clipboard.readText();
+          if (!text) return;
+          const rowDataList = text.split(/\r\n|\n|\r/);
+          const targetTable = lastActiveCell.closest('table');
+          const tableBody = targetTable.querySelector('tbody');
+          const startRowIndex = lastActiveCell.parentElement.rowIndex;
+          const startColumnIndex = lastActiveCell.cellIndex;
+
+          rowDataList.forEach(function(rowContent, rowIndexOffset) {
+            let targetRow = targetTable.rows[startRowIndex + rowIndexOffset];
+            if (!targetRow) {
+              const newRow = createBlankRow(targetTable);
+              tableBody.appendChild(newRow);
+              targetRow = newRow;
+            }
+            const columnDataList = rowContent.split('\t');
+            columnDataList.forEach(function(cellContent, columnIndexOffset) {
+              const targetCell = targetRow.cells[startColumnIndex + columnIndexOffset];
+              if (targetCell && targetCell.getAttribute('contenteditable') === 'true') {
+                targetCell.textContent = cellContent.replace(/[\r\n]+/g, '');
+              }
+            });
+          });
+          renumberTable(tableBody);
+        } catch (err) { alert('クリップボードのアクセスを許可してください。'); }
+      });
+
+      document.getElementById('btn-delete').addEventListener('click', function() {
+        if (!lastActiveCell) return alert('削除対象のセルを選択してください。');
+        const targetTable = lastActiveCell.closest('table');
+        const tableBody = targetTable.querySelector('tbody');
+        const inputPrompt = prompt("削除する行の範囲を入力してください（例：3-5）\n※1行だけなら数字を1つ入力");
+        if (!inputPrompt) return;
+        const rangeValues = inputPrompt.split('-').map(Number);
+        const startNumber = rangeValues[0];
+        const endNumber = rangeValues[1] || startNumber;
+
+        for (let i = endNumber; i >= startNumber; i--) {
+          const rowToRemove = tableBody.rows[i - 1];
+          if (rowToRemove) tableBody.removeChild(rowToRemove);
+        }
+        if (tableBody.rows.length === 0) tableBody.appendChild(createBlankRow(targetTable));
+        renumberTable(tableBody);
+        lastActiveCell = null;
+      });
+
+      document.getElementById('btn-calc-extract').addEventListener('click', function() {
+        const dbTable = document.getElementById('food-database');
+        const dbRows = Array.from(dbTable.querySelector('tbody').rows);
+        const people1 = parseFloat(document.getElementById('input-people-s1').value) || 0;
+        const people2 = parseFloat(document.getElementById('input-people-s2').value) || 0;
+
+        const targetTables = [
+          { school: '学校1', month: 1, people: people1, id: 'cutoff-school1-month1' },
+          { school: '学校2', month: 1, people: people2, id: 'cutoff-school2-month1' },
+          { school: '学校1', month: 2, people: people1, id: 'cutoff-school1-month2' },
+          { school: '学校2', month: 2, people: people2, id: 'cutoff-school2-month2' },
+          { school: '学校1', month: 3, people: people1, id: 'cutoff-school1-month3' },
+          { school: '学校2', month: 3, people: people2, id: 'cutoff-school2-month3' }
+        ];
+
+        targetTables.forEach(t => document.getElementById(t.id).querySelector('tbody').innerHTML = '');
+
+        const targetFoods = dbRows.filter(row => row.cells[6].textContent.includes('使い切り'));
+        if (targetFoods.length === 0) return alert('食品DBに「使い切り」カテゴリーの食品が見つかりません。');
+
+        const runningInventory = {}; 
+
+        targetFoods.forEach(foodRow => {
+          const fNum = foodRow.cells[1].textContent.trim();
+          const fName = foodRow.cells[2].textContent.trim();
+          const k1 = parseFloat(foodRow.cells[3].textContent) || 0;
+          const k2 = parseFloat(foodRow.cells[4].textContent) || 0;
+          const k3 = parseFloat(foodRow.cells[5].textContent) || 0;
+          const formats = [k1, k2, k3].filter(v => v > 0).sort((a, b) => b - a);
+
+          ['学校1', '学校2'].forEach(school => {
+            const invTable = document.getElementById(`inventory-${school === '学校1' ? 'school1' : 'school2'}`);
+            const invRow = Array.from(invTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === fNum);
+            
+            formats.forEach((fmt, idx) => {
+              const key = `${school}_${fNum}_${fmt}`;
+              let initialStock = 0;
+              if (invRow) {
+                initialStock = parseFloat(invRow.cells[idx + 3].textContent) || 0;
+              }
+              runningInventory[key] = initialStock;
+            });
+          });
+
+          targetTables.forEach(target => {
+            const schoolCode = target.school === '学校1' ? 'school1' : 'school2';
+            const sourceId = `usage-${schoolCode}-month${target.month}-single`;
+            const sourceTable = document.getElementById(sourceId);
+            const reductionTable = document.getElementById(`reduction-${schoolCode}`);
+            if (!sourceTable) return;
+            
+            const sourceRow = Array.from(sourceTable.querySelector('tbody').rows).find(r => 
+              r.cells[1].textContent.trim() === fNum && 
+              r.cells[2].textContent.trim() === fName
+            );
+            
+            if (sourceRow) {
+              const targetTableElement = document.getElementById(target.id);
+              const tbody = targetTableElement.querySelector('tbody');
+              
+              formats.forEach(fmt => {
+                const tr = createBlankRow(targetTableElement);
+                tr.cells[1].textContent = fNum;
+                tr.cells[2].textContent = fName;
+                tr.cells[3].textContent = fmt;
+
+                let rowSum = 0; 
+                for (let d = 3; d <= 33; d++) {
+                  const unitUsage = parseFloat(sourceRow.cells[d].textContent) || 0;
+                  const totalUsage = unitUsage * target.people;
+
+                  if (totalUsage > 0) {
+                    const bestCombo = findBestCombination(totalUsage, formats);
+                    const count = bestCombo[fmt] || 0;
+                    tr.cells[d + 1].textContent = count > 0 ? count : '';
+                    rowSum += count; 
+                  }
+                }
+                
+                const lastCellIndex = tr.cells.length - 2;
+                tr.cells[lastCellIndex].textContent = rowSum > 0 ? rowSum : '';
+
+                const key = `${target.school}_${fNum}_${fmt}`;
+                const currentStock = runningInventory[key] || 0;
+                
+                let gensuHaki = 0;
+                if (reductionTable) {
+                  const redRow = Array.from(reductionTable.querySelector('tbody').rows).find(r => 
+                    r.cells[1].textContent.trim() === fNum && 
+                    parseFloat(r.cells[3].textContent) === fmt
+                  );
+                  if (redRow) {
+                    const colOffset = (target.month - 1) * 2;
+                    const gensu = parseFloat(redRow.cells[4 + colOffset].textContent) || 0;
+                    const haki = parseFloat(redRow.cells[5 + colOffset].textContent) || 0;
+                    gensuHaki = gensu + haki;
+                  }
+                }
+
+                const nextStock = currentStock + rowSum - gensuHaki - rowSum;
+                runningInventory[key] = nextStock;
+                tr.cells[tr.cells.length - 1].textContent = nextStock;
+                
+                tbody.appendChild(tr);
+              });
+              renumberTable(tbody);
+            }
+          });
+        });
+        alert('使い切り抽出および在庫予測の計算が完了しました。');
+      });
+
+      function findBestCombination(usage, formats) {
+        let minDiff = Infinity;
+        let minItems = Infinity;
+        let bestResult = {};
+
+        function backtrack(index, currentCounts, currentWeight) {
+          if (index === formats.length) {
+            if (currentWeight >= usage) {
+              const diff = currentWeight - usage;
+              const items = Object.values(currentCounts).reduce((a, b) => a + b, 0);
+              if (diff < minDiff || (diff === minDiff && items < minItems)) {
+                minDiff = diff;
+                minItems = items;
+                bestResult = { ...currentCounts };
+              }
+            }
+            return;
+          }
+          const fmt = formats[index];
+          const maxCount = Math.ceil(usage / fmt) + 1;
+          for (let i = 0; i <= maxCount; i++) {
+            currentCounts[fmt] = i;
+            backtrack(index + 1, currentCounts, currentWeight + (fmt * i));
+            if (currentWeight + (fmt * i) > usage + formats[formats.length-1]) break;
+          }
+        }
+        backtrack(0, {}, 0);
+        return bestResult;
+      }
+
+      // --- 保存・共通機能 ---
+      function collectAllData() {
+        const allData = {};
+        document.querySelectorAll('table').forEach(table => {
+          const rows = [];
+          table.querySelectorAll('tbody tr').forEach(tr => {
+            rows.push(Array.from(tr.cells).map(td => td.textContent));
+          });
+          allData[table.id] = rows;
+        });
+        allData['people_counts'] = {
+          s1: document.getElementById('input-people-s1').value,
+          s2: document.getElementById('input-people-s2').value
+        };
+        return allData;
+      }
+
+      function applyDataToTables(allData) {
+        if(allData.people_counts) {
+          document.getElementById('input-people-s1').value = allData.people_counts.s1;
+          document.getElementById('input-people-s2').value = allData.people_counts.s2;
+        }
+        for (const tableId in allData) {
+          if (tableId === 'people_counts') continue;
+          const table = document.getElementById(tableId);
+          if (!table) continue;
+          const tbody = table.querySelector('tbody');
+          tbody.innerHTML = ''; 
+          allData[tableId].forEach(rowData => {
+            const tr = createBlankRow(null, rowData.length);
+            rowData.forEach((text, colIdx) => {
+              if (colIdx !== 0) { tr.cells[colIdx].setAttribute('contenteditable', 'true'); tr.cells[colIdx].addEventListener('keydown', disableNewLine); }
+              else { tr.cells[colIdx].setAttribute('contenteditable', 'false'); }
+              tr.cells[colIdx].textContent = text;
+            });
+            tbody.appendChild(tr);
+          });
+        }
+      }
+
+      document.getElementById('btn-save').addEventListener('click', () => { localStorage.setItem('gensu_app_data', JSON.stringify(collectAllData())); alert('一時保存しました。'); });
+      document.getElementById('btn-load').addEventListener('click', () => { const saved = localStorage.getItem('gensu_app_data'); if (saved) applyDataToTables(JSON.parse(saved)); alert('復元しました。'); });
+      document.getElementById('btn-json-export').addEventListener('click', () => {
+        const data = collectAllData();
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `gensu_data_${new Date().getTime()}.json`; a.click();
+      });
+      document.getElementById('btn-json-import-trigger').addEventListener('click', () => document.getElementById('input-json-file').click());
+      document.getElementById('input-json-file').addEventListener('change', (e) => {
+        const reader = new FileReader();
+        reader.onload = (event) => { applyDataToTables(JSON.parse(event.target.result)); alert('読込完了'); };
+        reader.readAsText(e.target.files[0]);
+      });
+      document.getElementById('btn-clear').addEventListener('click', () => { if (confirm('全消去しますか？')) location.reload(); });
+      document.getElementById('btn-calc-weight').addEventListener('click', () => { triggerWeightCalculation(); alert('重量計算完了'); });
+      document.getElementById('btn-calc-open').addEventListener('click', () => { runOpeningCalculation(); alert('重量・開封計算完了'); });
+
+      function triggerWeightCalculation() {
+        const p1 = parseFloat(document.getElementById('input-people-s1').value) || 0;
+        const p2 = parseFloat(document.getElementById('input-people-s2').value) || 0;
+        for (let m = 1; m <= 3; m++) { runWeightCalc('学校1', m, p1); runWeightCalc('学校2', m, p2); }
+      }
+
+      function runWeightCalc(school, month, people) {
+        const idBase = school === '学校1' ? 'school1' : 'school2';
+        const singleTable = document.getElementById(`usage-${idBase}-month${month}-single`);
+        const totalTable = document.getElementById(`usage-${idBase}-month${month}-total`);
+        if (!singleTable || !totalTable) return;
+        const sRows = singleTable.querySelector('tbody').rows, tBody = totalTable.querySelector('tbody');
+        tBody.innerHTML = '';
+        Array.from(sRows).forEach((sRow) => {
+          const tRow = createBlankRow(totalTable);
+          tRow.cells[1].textContent = sRow.cells[1].textContent; 
+          tRow.cells[2].textContent = sRow.cells[2].textContent;
+          for (let d = 3; d < sRow.cells.length; d++) {
+            const val = parseFloat(sRow.cells[d].textContent) || 0;
+            const res = val * people;
+            tRow.cells[d].textContent = res > 0 ? res.toFixed(1) : '';
+          }
+          tBody.appendChild(tRow);
+        });
+        renumberTable(tBody);
+      }
+
+      function runOpeningCalculation() {
+        triggerWeightCalculation();
+        const schools = ['学校1', '学校2'], dbTable = document.getElementById('food-database');
+        if (!dbTable) return;
+        const dbRows = Array.from(dbTable.querySelector('tbody').rows);
+        schools.forEach(school => {
+          const idBase = school === '学校1' ? 'school1' : 'school2';
+          for (let m = 1; m <= 3; m++) {
+            const totalTable = document.getElementById(`usage-${idBase}-month${m}-total`);
+            if (!totalTable) continue;
+            const tBody = totalTable.querySelector('tbody'), rows = Array.from(tBody.rows);
+            for (let i = rows.length - 1; i >= 0; i--) {
+              const fNum = rows[i].cells[1].textContent.trim();
+              const fName = rows[i].cells[2].textContent.trim();
+              const dbMatch = dbRows.find(r => r.cells[1].textContent.trim() === fNum && r.cells[2].textContent.trim() === fName);
+              const category = dbMatch ? dbMatch.cells[6].textContent.trim() : "";
+              if (category !== "通常" && category !== "個数") tBody.deleteRow(i);
+            }
+            renumberTable(tBody);
+          }
+          const inventoryTable = document.getElementById(`inventory-${idBase}`);
+          const reductionTable = document.getElementById(`reduction-${idBase}`); 
+          if (!inventoryTable) return;
+          const invRows = Array.from(inventoryTable.querySelector('tbody').rows);
+          invRows.forEach(invRow => {
+            const foodNum = invRow.cells[1].textContent.trim(), foodName = invRow.cells[2].textContent.trim();
+            const dbData = dbRows.find(r => r.cells[1].textContent.trim() === foodNum && r.cells[2].textContent.trim() === foodName);
+            if (!dbData) return;
+            const kikaku1 = parseFloat(dbData.cells[3].textContent) || 0, category = dbData.cells[6].textContent.trim();
+            if (category === "通常" || category === "個数") {
+              if (kikaku1 <= 0) return;
+              
+              let hasuZanryoVar = parseFloat(invRow.cells[6].textContent) || 0;
+              let stockUnopenedVar = parseFloat(invRow.cells[3].textContent) || 0; 
+
+              for (let m = 1; m <= 3; m++) {
+                const totalTable = document.getElementById(`usage-${idBase}-month${m}-total`);
+                if (!totalTable) continue;
+                const targetRow = Array.from(totalTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === foodNum);
+                if (!targetRow) continue;
+                
+                let monthlyKaifuuTotal = 0, monthlyUsageTotal = 0;
+                for (let d = 3; d <= 33; d++) {
+                  let shiyoryo = parseFloat(targetRow.cells[d].textContent) || 0;
+                  monthlyUsageTotal += shiyoryo;
+                  let fusokubun = shiyoryo - hasuZanryoVar, dailyKaifuusu = 0;
+                  if (fusokubun > 0) { dailyKaifuusu = Math.ceil(fusokubun / kikaku1); hasuZanryoVar = (dailyKaifuusu * kikaku1) - fusokubun; }
+                  else { dailyKaifuusu = 0; hasuZanryoVar = hasuZanryoVar - shiyoryo; }
+                  targetRow.cells[d].textContent = dailyKaifuusu > 0 ? dailyKaifuusu : (shiyoryo > 0 ? 0 : '');
+                  monthlyKaifuuTotal += dailyKaifuusu;
+                }
+                
+                const maxDelivery = Math.ceil(monthlyUsageTotal / kikaku1);
+                targetRow.cells[34].textContent = maxDelivery;
+                targetRow.cells[35].textContent = monthlyKaifuuTotal;
+
+                let monthlyGensuHaki = 0;
+                if (reductionTable) {
+                  const redRow = Array.from(reductionTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === foodNum);
+                  if (redRow) {
+                    const colOffset = (m - 1) * 2;
+                    const gensu = parseFloat(redRow.cells[4 + colOffset].textContent) || 0;
+                    const haki = parseFloat(redRow.cells[5 + colOffset].textContent) || 0;
+                    monthlyGensuHaki = gensu + haki;
+                  }
+                }
+
+                stockUnopenedVar = stockUnopenedVar + maxDelivery - monthlyKaifuuTotal - monthlyGensuHaki;
+                
+                targetRow.cells[36].textContent = stockUnopenedVar;
+                targetRow.cells[37].textContent = hasuZanryoVar.toFixed(1);
+              }
+            }
+          });
+        });
+      }
+    });
+  </script>
+</body>
+</html>
