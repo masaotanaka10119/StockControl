@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <!--スマホ等の画面幅に合わせたレスポンシブ表示を有効にします。-->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>減数報告管理システム</title>
   <style>
@@ -11,7 +12,9 @@
     .category-title { font-size: 1.3rem; margin-bottom: 15px; background: #eee; padding: 10px; border-radius: 4px; text-align: center; }
     
     .sub-category-header { 
+      /*要素を横並びにします。*/
       display: flex; 
+      /*左右の両端に要素を振り分けます。*/
       justify-content: space-between; 
       align-items: center; 
       background: #d5dbdb; 
@@ -20,6 +23,7 @@
       border-radius: 4px;
       font-weight: bold;
     }
+    /*ボタンの共通デザイン*/
     .sub-btn-group { display: flex; gap: 10px; }
     .sub-btn { padding: 5px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.8rem; }
     .calc-weight-btn { background: #8e44ad; } 
@@ -34,17 +38,21 @@
     .background-green { background: #2ecc71; }
     .background-orange { background: #e67e22; }
     .background-blue { background: #3498db; margin-right: 5px; }
+    /*テーブルが横に長い場合にスクロールできるようにします。*/
     .table-container { width: 100%; overflow-x: auto; border: 1px solid #ddd; }
     table { width: 100%; border-collapse: collapse; white-space: nowrap; }
     th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; font-size: 0.75rem; }
+    /*見出し行の色を薄グレーにし、スクロール時に上に固定します。*/
     th { background-color: #f8f9fa; position: sticky; top: 0; }
     td:first-child { background-color: #f9f9f9; color: #666; font-weight: bold; width: 30px; }
 
+    /*クリックされたセルを青い枠線と背景色で強調します。*/
     .selected-cell {
       outline: 2px solid #3498db !important;
       background-color: #d1e7ff !important;
     }
 
+    /*画面上部に固定されるボタンエリアのスタイルです。*/
     #action-control-panel {
       position: fixed; top: 0; left: 0; right: 0;
       background: white; padding: 15px; border-bottom: 2px solid #ddd;
@@ -84,510 +92,913 @@
   </div>
 
   <h1>減数報告管理システム</h1>
+  <!--ここに各テーブルがプログラムによって流し込まれます。-->
   <div id="main-content"></div>
 
   <script>
+    //画面の画像や部品がすべて読み込まれた瞬間に、中身の命令を実行する合図です。
     window.addEventListener('load', function() {
+      //「main-content」という空の箱を、プログラムから操作できるように捕まえておきます。
       const mainContentArea = document.getElementById('main-content');
+      //最後にクリックしたセルを覚えておくための変数です
       let lastActiveCell = null;
 
+      //Enterキーでの改行を止めるための関数定義。
+      //Excelのように、Enterを押しても中で改行されないようにする設定の説明です。
       function disableNewLine(event) {
+        //押されたキーがEnterなら
         if (event.key === 'Enter') {
+          //本来の改行動作をキャンセルします。
           event.preventDefault();
+          //そのセルからフォーカスを外して編集を確定させます。
           event.target.blur();
         }
       }
 
+      //空っぽの行を作る関数
       function createBlankRow(targetTable, colCount = null) {
+        //行要素を作ります。
         const tr = document.createElement('tr');
+        //列の数を決めます。指定（colCount）があればそれを使い、なければそのテーブルの1行目と同じ列数にします。
         const totalColumnCount = colCount || targetTable.rows[0].cells.length;
+        //列の数だけ繰り返します。
         for (let i = 0; i < totalColumnCount; i++) {
+          //セル要素を作ります。
           const td = document.createElement('td');
+          //もし1列目（No.列）なら。
           if (i === 0) {
+            //入力できないようにします。
             td.setAttribute('contenteditable', 'false');
+            //2列目以降（データを入れる場所）だった場合の処理です。
           } else {
+            //ユーザーが入力できるようにします。
             td.setAttribute('contenteditable', 'true');
+            //さっきの改行禁止の関数による設定を適用します。
             td.addEventListener('keydown', disableNewLine);
           }
+          //行にセルを追加します。
           tr.appendChild(td);
         }
+        //出来上がった行を返します。
         return tr;
       }
 
+      //No.列の番号を振り直す関数。
       function renumberTable(tableBody) {
+        //全行に対して順番に処理します。
         Array.from(tableBody.rows).forEach((row, index) => {
+          //1番目から順に数字を書き込みます。
           row.cells[0].textContent = index + 1;
         });
       }
 
+      //タイトル付きの枠を作る関数。
+      //「1. 在庫」や「2. 使用量」といった大きな見出しの箱を作る命令です。
       function createCategoryWrapper(titleText) {
+        //外枠要素を作ります。
         const wrapperDiv = document.createElement('div');
+        //スタイルを適用します。
         wrapperDiv.className = 'category-section';
+        //中に見出し文字を入れます。
         wrapperDiv.innerHTML = `<div class="category-title">${titleText}</div>`;
         return wrapperDiv;
       }
 
+      //「表作成マシーン（buildTableSet関数）」の定義
+      //buildTableSet という名前の命令（関数）の始まりです。
+      // 表の題名、学校名、ラベルの色、枠線の色、項目のリスト、表のIDという「6つの設定情報」を受け取って動きます。
       function buildTableSet(tableName, schoolName, labelColorClass, borderColorClass, columnList, tableIdName) {
+        //HTMLの section という新しい区切り要素を作成し、変数 tableSection に保存します。
+        // これが、一つの表と見出しを包み込む「白いカード状の枠」になります。
         const tableSection = document.createElement('section');
+        //表のタイトルを表示するための h2（中見出し）要素を新しく作成し、変数 headerTitle に保存します。
         const headerTitle = document.createElement('h2');
+        //作った見出しに、受け取った「枠線の色（緑かオレンジ）」のデザイン設定（クラス名）を割り当てます。
         headerTitle.className = borderColorClass;
+        //見出しの中に、表の名前（tableName）と、指定された色の学校名ラベル（schoolName）をHTML形式で書き込みます。
         headerTitle.innerHTML = `<span>${tableName}</span><span><span class="label ${labelColorClass}">${schoolName}</span></span>`;
         
+        //表が横に長くなった時にスクロールできるようにするための「外枠の箱」として、div 要素を新しく作成します。
         const scrollContainer = document.createElement('div');
+        //作った箱に、37行目で定義した「横スクロールを有効にする」ためのデザイン設定（クラス名）を適用します。
         scrollContainer.className = 'table-container';
+        //実際の「表」そのものとなる table 要素を新しく作成し、変数 tableElement に保存します。
         const tableElement = document.createElement('table');
+        //作成した表に、引数で指定された固有の名前（ID）を付与します。これで後から特定の表を指定してデータを操作できます。
         tableElement.id = tableIdName;
+        //表の「見出しエリア（一番上の項目名が並ぶ場所）」を作るための thead 要素を作成します。
         const tableHead = document.createElement('thead');
+        //見出しエリアの中に入れる「横一行」の枠組みである tr 要素を作成します。
         const headerRow = document.createElement('tr');
+        //ユーザーが実際に数字や文字を入力していく「表の本体（中身）」のエリアである tbody 要素を作成します。
         const tableBody = document.createElement('tbody');
 
+        //渡された項目名のリスト（columnList）の中身をバラバラにして広げ、
+        // その先頭に「No.」を付け加えた、新しい全列リストを作成します。
         const fullColumnList = ['No.', ...columnList];
+        //作成したリスト（No.、食品名など）から項目名を一つずつ取り出し、以下の行の作業を項目数の分だけ繰り返します。
         fullColumnList.forEach(function(columnName) {
+          //見出し専用の特別なマス目である th 要素を新しく一つ作成します。
           const headerCell = document.createElement('th');
+          //そのマス目の中に、今取り出している項目名（「No.」や「食品名」など）を文字として書き込みます。
           headerCell.textContent = columnName;
+          //文字を書いた見出しのマス目を、前の処理で作った「見出しの行」の右端に順番に繋いでいきます。
           headerRow.appendChild(headerCell);
         });
 
+        //183行目までで項目名（No.や食品名など）を並べて
+        // 完成させた「見出しの行」を、見出しエリア（thead）の中にカチッとはめ込みます。
         const firstDataRow = createBlankRow(null, fullColumnList.length);
+        //定義した「空の行を作る命令」を使い、見出しと同じ列の数を持つ新しい行を作成して firstDataRow に保存します。
         firstDataRow.cells[0].textContent = '1';
+        //作成した行の一番左端（0番目）のマス目に、最初の行番号として「1」という文字を書き込みます。
         tableBody.appendChild(firstDataRow);
 
+        //番号を振ったこの1行目を、データ入力エリア（tbody）の中にはめ込みます
         tableHead.appendChild(headerRow);
+        //項目名が入った「見出しエリア」を、表の土台（tableElement）の上部に合体させます。
         tableElement.appendChild(tableHead);
+        //1行目が入った「データエリア」を、表の土台（tableElement）の下部に合体させます。これで1つの「表」が組み上がります。
         tableElement.appendChild(tableBody);
+        //組み上がった表を、前の処理で作った「横スクロールを管理する箱」の中に収納します。
         scrollContainer.appendChild(tableElement);
+        //前の処理で作った「白いカード枠」の最上部に、表のタイトル（学校名ラベル付きの見出し）を載せます。
         tableSection.appendChild(headerTitle);
+        //タイトルのすぐ下に、表が入った「スクロール箱」を繋げます。これで1つのセクションが完成します
         tableSection.appendChild(scrollContainer);
 
+        //表の本体（tbody）に対して、「クリックされたら以下の { } 内の命令を実行せよ」という予約を入れます。
         tableBody.addEventListener('click', function(e) {
+          //実際にクリックされた場所（文字や余白）から、一番近い「マス目（td）」を特定し、変数 cell に保存します。
           const cell = e.target.closest('td');
+          //もしクリックされた場所がマス目の外側（隙間など）だった場合は、この後の処理をせず、ここで中断します。
           if (!cell) return;
+          //もし「前にクリックして青くなっているマス」が他にあれば、その青い枠の設定を解除して元に戻します。
           if (lastActiveCell) lastActiveCell.classList.remove('selected-cell');
+          //今クリックされたマスを、新しく「最後に選んだ場所」として変数 lastActiveCell に上書き保存します。
           lastActiveCell = cell;
+          //今クリックされたマスに、決めた「青い枠と背景色」のデザインを適用して光らせます。
           lastActiveCell.classList.add('selected-cell');
         });
 
+        //見出し、表、クリックの仕掛けがすべて完成した「白いカード枠（tableSection）」を、この命令の呼び出し元へ届けます。
         return tableSection;
       }
 
       // --- テーブル構成定義 ---
+
+      //「1. 減数報告3ヵ月前の在庫」という大きな見出しが付いた「箱（セクション）」を新しく作ります。
       const section1 = createCategoryWrapper("1. 減数報告3ヵ月前の在庫");
+      //在庫表に必要な項目名（列の名前）のリストを作ります。これに自動で「No.」が加わります。
       const inventoryColumns = ['食品番号', '食品名', '規格1(未開封)', '規格2(未開封)', '規格3(未開封)', '端数(g)'];
+      //学校1用の在庫表を作成します。ラベルを緑色（background-green）にし、IDを inventory-school1 としてセクションに追加します。
       section1.appendChild(buildTableSet("在庫", "学校1", "background-green", "border-green", inventoryColumns, "inventory-school1"));
+      //学校2用の在庫表を作成します。ラベルをオレンジ色（background-orange）にし、IDを inventory-school2 として追加します。
       section1.appendChild(buildTableSet("在庫", "学校2", "background-orange", "border-orange", inventoryColumns, "inventory-school2"));
+      //完成した「1. 在庫」のセクション（学校1と2の表が入った状態）を、画面のメインエリアに配置します。
       mainContentArea.appendChild(section1);
 
+      //次の大きな見出し「2. ３カ月間使用量」の箱を新しく作成します。
       const section2 = createCategoryWrapper("2. ３カ月間使用量");
+      //1から31までの数字が並んだリストを自動で作ります。{length: 31} で31個分用意し、index + 1 で「1, 2, 3...31」という数字を生成しています。
       const dayNumbers = Array.from({length: 31}, (_, index) => index + 1);
+      //「1人分使用量」の表に並べる項目名を決めます。...dayNumbers を使うことで、先ほど作った1〜31の数字が横にずらっと展開されます。
       const usageColumnsSingle = ['食品番号', '食品名', ...dayNumbers];
+      //「人数分使用量」の表の項目名です。1〜31日の後に、計算結果を入れるための「最大納品数」や「在庫数」などの項目を付け加えています。
       const usageColumnsTotal = ['食品番号', '食品名', ...dayNumbers, '最大納品数', '開封数', '在庫数', '在庫(端数g)'];
 
+      //学校1の「1人分・1か月目」の表を作成し、セクションに追加します。IDは usage-school1-month1-single です。
       section2.appendChild(buildTableSet("使用量(1人分) 1か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month1-single"));
+      //学校1の「1人分・2か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(1人分) 2か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month2-single"));
+      //学校1の「1人分・3か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(1人分) 3か月目", "学校1", "background-green", "border-green", usageColumnsSingle, "usage-school1-month3-single"));
+      //学校2の「1人分・1か月目」の表を作成します。ラベルはオレンジ色です。
       section2.appendChild(buildTableSet("使用量(1人分) 1か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month1-single"));
-      section2.appendChild(buildTableSet("開用量(1人分) 2か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month2-single"));
+      //学校2の「1人分・2か月目」の表を作成します。
+      section2.appendChild(buildTableSet("使用量(1人分) 2か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month2-single"));
+      //学校2の「1人分・3か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(1人分) 3か月目", "学校2", "background-orange", "border-orange", usageColumnsSingle, "usage-school2-month3-single"));
 
+      //同じセクションの中に、計算ボタンを置くための「サブ見出し用の枠」を新しく作ります。
       const subHeaderUsage = document.createElement('div');
+      //作った枠に、CSSで決めたサブ見出し用のデザイン（少しグレーの背景など）を適用します。
       subHeaderUsage.className = 'sub-category-header';
+      //枠の中に「重量計算のみ」と「開封計算実行」の2つのボタンをHTMLとして一気に書き込みます。
       subHeaderUsage.innerHTML = `<span>３カ月間使用量(人数分)</span><div class="sub-btn-group"><button id="btn-calc-weight" class="sub-btn calc-weight-btn">重量計算のみ</button><button id="btn-calc-open" class="sub-btn calc-open-btn">開封計算実行</button></div>`;
+      //完成したボタン付きのサブ見出しを、セクションに追加します。
       section2.appendChild(subHeaderUsage);
 
+      //学校1の「人数分・1か月目」の表を作成します。前の処理で作った「最大納品数」などの項目が含まれる広い列リスト（usageColumnsTotal）を使用します。
       section2.appendChild(buildTableSet("使用量(人数分) 1か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month1-total"));
+      //学校1の「人数分・2か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(人数分) 2か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month2-total"));
+      //学校1の「人数分・3か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(人数分) 3か月目", "学校1", "background-green", "border-green", usageColumnsTotal, "usage-school1-month3-total"));
+      //学校2の「人数分・1か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(人数分) 1か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month1-total"));
+      //学校2の「人数分・2か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(人数分) 2か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month2-total"));
+      //学校2の「人数分・3か月目」の表を作成します。
       section2.appendChild(buildTableSet("使用量(人数分) 3か月目", "学校2", "background-orange", "border-orange", usageColumnsTotal, "usage-school2-month3-total"));
+      //これで「2. ３カ月間使用量」の全12個の表と見出し・ボタンが揃いました。そのすべてを画面のメインエリアに追加して表示させます。
       mainContentArea.appendChild(section2);
 
+      //次の大きな見出し「3. 食品減数データ」の箱を新しく作成します。
       const section3 = createCategoryWrapper("3. 食品減数データ");
+      //食品減数データ」の表に並べる項目名（列）を定義します。各月ごとの「減数」と「廃棄」を入力する欄が含まれます。
       const reductionColumns = ['食品番号', '食品名', '規格', '翌月減数', '翌月廃棄', '翌々月減数', '翌々月廃棄', '3ヶ月後減数', '3ヶ月後廃棄'];
+      //学校1用の減数報告表を作成し、セクション3に追加します。
       section3.appendChild(buildTableSet("減数", "学校1", "background-green", "border-green", reductionColumns, "reduction-school1"));
+      //学校2用の減数報告表を作成し、セクション3に追加します。
       section3.appendChild(buildTableSet("減数", "学校2", "background-orange", "border-orange", reductionColumns, "reduction-school2"));
+      //完成した「3. 食品減数データ」のエリアを画面に追加します。
       mainContentArea.appendChild(section3);
 
-      const section5 = createCategoryWrapper("4. ３カ月間使い切り使用数抽出");
+      //「4. 使い切り使用数抽出」という見出しの新しいセクション（箱）を作成します。
+      const section4 = createCategoryWrapper("4. ３カ月間使い切り使用数抽出");
+      //前の処理で作った1〜31の数字を、計算用ではなく表示用の「文字」として整え直します。
       const dayHeadersLong = dayNumbers.map(n => n.toString());
+      //基本となる抽出表の項目名を決めます。1〜31日の数字の後に、予測結果を入れる列を配置します。
       const cutoffColumnsBase = ['食品番号', '食品名', '規格', ...dayHeadersLong, '最大納品数', '在庫予測'];
+      //3か月目などに使用する、少し項目の多い列リストです。「開封数」という項目が1つ追加されています。
       const cutoffColumnsWithOpening = ['食品番号', '食品名', '規格', ...dayHeadersLong, '開封数', '最大納品数', '在庫予測']; 
 
+      //セクションの中に置く、ボタン用のサブ見出し枠を作成します。
       const subHeaderCutoff = document.createElement('div');
+      //サブ見出し用のデザイン（CSSクラス）を適用します。
       subHeaderCutoff.className = 'sub-category-header';
+      //枠の中に「使い切り抽出」ボタンを配置するHTMLを書き込みます。
       subHeaderCutoff.innerHTML = `<span>使い切りデータ抽出</span><div class="sub-btn-group"><button id="btn-calc-extract" class="sub-btn calc-extract-btn">使い切り抽出</button></div>`;
-      section5.appendChild(subHeaderCutoff);
+      //ボタンの入ったサブ見出しを、セクションに追加します。
+      section4.appendChild(subHeaderCutoff);
 
-      section5.appendChild(buildTableSet("使い切り 1か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month1"));
-      section5.appendChild(buildTableSet("使い切り 2か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month2"));
-      section5.appendChild(buildTableSet("使い切り 3か月目", "学校1", "background-green", "border-green", cutoffColumnsWithOpening, "cutoff-school1-month3"));
-      section5.appendChild(buildTableSet("使い切り 1か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month1"));
-      section5.appendChild(buildTableSet("使い切り 2か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month2"));
-      section5.appendChild(buildTableSet("使い切り 3か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month3"));
-      mainContentArea.appendChild(section5);
+      //学校1の「使い切り 1か月目」の表を作ります。前の処理で作った基本の列項目（cutoffColumnsBase）を使用します。
+      section4.appendChild(buildTableSet("使い切り 1か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month1"));
+      //学校1の「使い切り 2か月目」の表を作成します。
+      section4.appendChild(buildTableSet("使い切り 2か月目", "学校1", "background-green", "border-green", cutoffColumnsBase, "cutoff-school1-month2"));
+      //学校1の「使い切り 3か月目」の表を作成します。ここだけ「開封数」の項目が入ったリストを使用しています。
+      section4.appendChild(buildTableSet("使い切り 3か月目", "学校1", "background-green", "border-green", cutoffColumnsWithOpening, "cutoff-school1-month3"));
+      //学校2の「使い切り 1か月目」の表を作成します。
+      section4.appendChild(buildTableSet("使い切り 1か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month1"));
+      //学校2の「使い切り 2か月目」の表を作成します。
+      section4.appendChild(buildTableSet("使い切り 2か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month2"));
+      //学校2の「使い切り 3か月目」の表を作成します。
+      section4.appendChild(buildTableSet("使い切り 3か月目", "学校2", "background-orange", "border-orange", cutoffColumnsBase, "cutoff-school2-month3"));
+      //これで「4. 使い切り使用数抽出」の全6つの表が揃いました。そのすべてを画面のメインエリアに追加して表示させます。
+      mainContentArea.appendChild(section4);
 
-      const section6 = createCategoryWrapper("5. 食品DB");
+      //最後の大きな見出し「5. 食品DB（データベース）」の箱を新しく作成します。
+      const section5 = createCategoryWrapper("5. 食品DB");
+      //食品データベース表に並べる項目（列）を定義します。一番右の「カテゴリー」が計算の振分け（使い切りか通常か）に重要になります。
       const databaseColumns = ['食品番号', '食品名', '規格1', '規格2', '規格3', 'カテゴリー'];
-      section6.appendChild(buildTableSet("食品DB", "共通", "background-blue", "border-blue", databaseColumns, "food-database"));
-      mainContentArea.appendChild(section6);
+      //全体で共通して使う「食品DB」の表を作成します。ラベルは青色（background-blue）で作成されます。
+      section5.appendChild(buildTableSet("食品DB", "共通", "background-blue", "border-blue", databaseColumns, "food-database"));
+      //最後の「食品DB」セクションを画面のメインエリアに追加します。これで全ての表が画面に並びきりました。
+      mainContentArea.appendChild(section5);
 
       // --- ボタンアクション ---
 
+      //「行を追加」ボタン（ID: btn-add-row）がクリックされたら、以下の { } 内の命令を実行するよう予約します。
       document.getElementById('btn-add-row').addEventListener('click', function() {
+        //もし、どのマス目も選択されていない（青くなっていない）状態でボタンが押されたら、
+        // 「どこに追加すればいいかわかりません」という警告を出して処理を中断します。
         if (!lastActiveCell) return alert('追加先のテーブル内のセルを選択してください。');
+        //今選んでいるマス目から、それが「どの表（table）」の中にあるかを探し出し、targetTable に保存します。
         const targetTable = lastActiveCell.closest('table');
+        //見つけ出した表の中から、データが入っている本体部分（tbody）を特定します。
         const tbody = targetTable.querySelector('tbody');
+        //作った「行を作る命令」を使い、その表の列数に合わせた空の新しい行を作成します。
         const newRow = createBlankRow(targetTable);
+        //今選んでいるマス目がある行（parentElement）のすぐ下に、新しく作った行を差し込みます。
         lastActiveCell.parentElement.after(newRow);
+        //行が増えたので、作った「番号を振り直す命令」を実行し、No.列の数字を 1, 2, 3... と綺麗に並べ直します。
         renumberTable(tbody);
       });
 
+      //「貼り付け」ボタンが押された時の動作を予約します。
+      // async は、クリップボードの読み取り待ちができるようにする魔法の言葉です。
       document.getElementById('btn-paste').addEventListener('click', async function() {
+        //貼り付け先（青い枠）が決まっていない場合は、警告を出して中断します。
         if (!lastActiveCell) return alert('貼り付け先のセルを選択してください。');
+        //「ここから先の処理でエラーが起きるかもしれないけれど、とりあえずやってみる」という宣言です。
         try {
+          //クリップボードに保存されている文字データを読み取ります。await で読み取りが終わるまで一瞬待ちます。
           const text = await navigator.clipboard.readText();
+          //もしコピーされている内容が空っぽなら、何もしません。
           if (!text) return;
+          //コピーした文章を「改行」の場所で切り分け、一行ずつのリスト（rowDataList）にします。
           const rowDataList = text.split(/\r\n|\n|\r/);
+          //貼り付け先の表を特定します。
           const targetTable = lastActiveCell.closest('table');
+          //その表の中身エリア（tbody）を特定します。
           const tableBody = targetTable.querySelector('tbody');
+          //選択しているマスの行番号を調べます（ここをスタート地点にします）。
           const startRowIndex = lastActiveCell.parentElement.rowIndex;
+          //選択しているマスの列番号を調べます。
           const startColumnIndex = lastActiveCell.cellIndex;
 
+          //コピーしたデータの「一行ずつ」に対して、以下の処理を繰り返します。
           rowDataList.forEach(function(rowContent, rowIndexOffset) {
+            //貼り付け先の行を特定します。
             let targetRow = targetTable.rows[startRowIndex + rowIndexOffset];
+            //もし貼り付けたいデータが今の表の行数より多い（はみ出る）場合は、以下の処理をします。
             if (!targetRow) {
+              //はみ出た分を受け止めるための、新しい空の行を作ります。
               const newRow = createBlankRow(targetTable);
+              //その新しい行を、表の最後に追加します。
               tableBody.appendChild(newRow);
+              //新しく作った行を、今回の貼り付け先として決定します。
               targetRow = newRow;
             }
+            //Excelの横並びデータ（タブ区切り）を一つずつのマス目データに切り分けます。
             const columnDataList = rowContent.split('\t');
+            //切り分けた「一マスずつ」のデータに対して、以下の書き込み処理をします。
             columnDataList.forEach(function(cellContent, columnIndexOffset) {
+              //実際に文字を書き込む「ターゲットのマス目」を特定します。
               const targetCell = targetRow.cells[startColumnIndex + columnIndexOffset];
+              //そのマスが存在し、かつ「入力可能（No.列以外）」であれば、次へ進みます。
               if (targetCell && targetCell.getAttribute('contenteditable') === 'true') {
+                //マス目の中にデータを書き込みます。その際、余計な改行コードは綺麗に消去（掃除）します。
                 targetCell.textContent = cellContent.replace(/[\r\n]+/g, '');
               }
             });
           });
+          //行が増えた可能性があるので、No.列の数字を 1, 2, 3... と綺麗に整えます。
           renumberTable(tableBody);
+          //もしブラウザのセキュリティ制限などで失敗した場合は、この警告を出します。
         } catch (err) { alert('クリップボードのアクセスを許可してください。'); }
       });
 
+      //「削除」ボタン（ID: btn-delete）が押された時の動作を予約します。
       document.getElementById('btn-delete').addEventListener('click', function() {
+        //どの表の行を消すか決めるため、どこか一箇所セルが選ばれている必要があります。選ばれていなければ警告を出して中断します。
         if (!lastActiveCell) return alert('削除対象のセルを選択してください。');
+        //選択されているマスから、対象となる「表」を特定します。
         const targetTable = lastActiveCell.closest('table');
+        //その表のデータ入力エリア（tbody）を特定します。
         const tableBody = targetTable.querySelector('tbody');
+        //画面に「何行目を消しますか？」という入力ボックス（プロンプト）を表示します。
         const inputPrompt = prompt("削除する行の範囲を入力してください（例：3-5）\n※1行だけなら数字を1つ入力");
+        //もしキャンセルボタンが押されたり、何も入力されなかった場合は、削除を中止します。
         if (!inputPrompt) return;
+        //入力された「3-5」のような文字を、「3」と「5」という「数字」に切り分けてリストにします。
         const rangeValues = inputPrompt.split('-').map(Number);
+        //削除を開始する行番号（例の「3」）を変数に保存します。
         const startNumber = rangeValues[0];
+        //削除を終了する行番号（例の「5」）を保存します。数字が一つだけ（例：「3」）なら、開始も終了も「3」になります。
         const endNumber = rangeValues[1] || startNumber;
 
+        //ここが重要です。 下の行から上の行に向かって順番に削除を実行します。
+        // 上から消すと行番号がズレてしまうため、必ず「後ろから」消していきます。
         for (let i = endNumber; i >= startNumber; i--) {
+          //消すべき行を特定します（コンピュータは0から数えるので、入力された番号から1を引きます）。
           const rowToRemove = tableBody.rows[i - 1];
+          //その行が存在すれば、表の中から取り除きます（削除します）。
           if (rowToRemove) tableBody.removeChild(rowToRemove);
         }
+        //もし全部消して表が空っぽになってしまったら、入力欄がなくなって困るので、新しく空の1行目を自動で追加します。
         if (tableBody.rows.length === 0) tableBody.appendChild(createBlankRow(targetTable));
+        //行が削除されて歯抜けになった「No.」列を、1から順番にきれいに振り直します。
         renumberTable(tableBody);
+        //行を消したことで「選択していたマス」が消滅した可能性があるため、一旦選択状態をリセットします。
         lastActiveCell = null;
       });
 
+      //「使い切り抽出」ボタン（ID: btn-calc-extract）が押された時の、非常に長い計算処理を開始します。
       document.getElementById('btn-calc-extract').addEventListener('click', function() {
+        //計算の根拠となる「食品DB」のテーブルを探し出し、変数 dbTable に保存します。
         const dbTable = document.getElementById('food-database');
+        //食品DBに登録されているすべての行（食品リスト）を取り出します。
         const dbRows = Array.from(dbTable.querySelector('tbody').rows);
+        //画面上部に入力された「学校1の人数」を読み取ります。空欄なら0として扱います。
         const people1 = parseFloat(document.getElementById('input-people-s1').value) || 0;
+        //同様に「学校2の人数」を読み取ります。
         const people2 = parseFloat(document.getElementById('input-people-s2').value) || 0;
 
+        //計算結果を書き込む先の表をリストアップします
         const targetTables = [
+          //「学校1の1か月目」の設定です。人数や書き込み先のIDをセットにしています。
           { school: '学校1', month: 1, people: people1, id: 'cutoff-school1-month1' },
+          //同様に「学校2の1か月目」の設定をセットにします。
           { school: '学校2', month: 1, people: people2, id: 'cutoff-school2-month1' },
+          //「学校1の2か月目」の設定です。人数データと、書き出し先のテーブルIDを紐付けます。
           { school: '学校1', month: 2, people: people1, id: 'cutoff-school1-month2' },
+          //同様に「学校2の2か月目」の設定をセットにします。
           { school: '学校2', month: 2, people: people2, id: 'cutoff-school2-month2' },
+          //「学校1の3か月目」の設定です。3か月目も同じ人数データを使用します。
           { school: '学校1', month: 3, people: people1, id: 'cutoff-school1-month3' },
+          //最後に「学校2の3か月目」の設定をセットにして、対象リストを閉じます。
           { school: '学校2', month: 3, people: people2, id: 'cutoff-school2-month3' }
         ];
 
+        //リストに挙げた全6つの表の中身を、計算を始める前に一旦すべて空っぽにします。
+        // 古いデータが残らないようにするための「お掃除」です。
         targetTables.forEach(t => document.getElementById(t.id).querySelector('tbody').innerHTML = '');
 
+        //食品DBの全データから、カテゴリー欄（7番目のセル）に「使い切り」という文字が
+        // 含まれている行だけを選び出し、リスト（targetFoods）にします。
         const targetFoods = dbRows.filter(row => row.cells[6].textContent.includes('使い切り'));
+        //もし「使い切り」に設定された食品が一つもなかった場合は、警告を出して計算を中止します。
         if (targetFoods.length === 0) return alert('食品DBに「使い切り」カテゴリーの食品が見つかりません。');
 
+        //計算の途中で変化していく在庫数を一時的に記録しておくための、空の入れ物（オブジェクト）を用意します。
         const runningInventory = {}; 
 
+        //「使い切り」対象となった食品一つひとつについて、以下の行から始まる一連の処理を繰り返します。
         targetFoods.forEach(foodRow => {
+          //食品DBから「食品番号」を読み取ります。前後の余計な空白は trim() で削除します。
           const fNum = foodRow.cells[1].textContent.trim();
+          //同様に、食品DBから「食品名」を読み取ります。
           const fName = foodRow.cells[2].textContent.trim();
+          //規格1の数値を読み取ります。数字でなければ0として扱います。
           const k1 = parseFloat(foodRow.cells[3].textContent) || 0;
+          //規格2の数値を読み取ります。
           const k2 = parseFloat(foodRow.cells[4].textContent) || 0;
+          //規格3の数値を読み取ります。
           const k3 = parseFloat(foodRow.cells[5].textContent) || 0;
+          //3つの規格のうち、0より大きいものだけを取り出し、**大きい順（例：10kg, 5kg, 1kg）**に並べ替えます。
           const formats = [k1, k2, k3].filter(v => v > 0).sort((a, b) => b - a);
 
+          //「学校1」と「学校2」のそれぞれに対して、以下の在庫確認作業を繰り返します。
           ['学校1', '学校2'].forEach(school => {
+            //読み取り対象となる在庫表（一番上の表）を、学校名に合わせて特定します。
             const invTable = document.getElementById(`inventory-${school === '学校1' ? 'school1' : 'school2'}`);
+            //その在庫表の中から、今注目している「食品番号（fNum）」と一致する行を一行だけ探し出します
             const invRow = Array.from(invTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === fNum);
             
+            //その食品の規格（例：10kg, 5kg...）ごとに、以下の在庫数保存処理を行います。
             formats.forEach((fmt, idx) => {
+              //どの学校の、どの食品の、どの規格かを示す「専用の合言葉（キー）」を作ります。
               const key = `${school}_${fNum}_${fmt}`;
+              //在庫数の初期値を一旦0に設定します。
               let initialStock = 0;
+              //もし在庫表の中にその食品が見つかった場合は、次へ進みます。
               if (invRow) {
+                //在庫表のマス（規格1〜3の列）から実際の数字を読み取ります。
                 initialStock = parseFloat(invRow.cells[idx + 3].textContent) || 0;
               }
+              //作った「一時記録所」に、合言葉とセットで在庫数を保存します。
               runningInventory[key] = initialStock;
             });
           });
 
+          //作った「書き出し先リスト（学校1・1か月目〜学校2・3か月目）」の計6つに対して、以下の処理を繰り返します。
           targetTables.forEach(target => {
+            //「学校1」なら school1、「学校2」なら school2 という、表のID（名前）の一部となる短い記号に変換します。
             const schoolCode = target.school === '学校1' ? 'school1' : 'school2';
+            //データの元ネタとなる「1人分使用量」の表のIDを組み立てます。
             const sourceId = `usage-${schoolCode}-month${target.month}-single`;
+            //その元ネタの表を実際に探し出します。
             const sourceTable = document.getElementById(sourceId);
+            //計算の途中で差し引く必要がある「減数・廃棄」の表も探し出します。
             const reductionTable = document.getElementById(`reduction-${schoolCode}`);
+            //万が一、元ネタの表が見つからなかった場合は、その月の計算をスキップします。
             if (!sourceTable) return;
             
+            //元ネタの表の中から、今から計算したい食品を探します。以下の行へと条件が続きます。
             const sourceRow = Array.from(sourceTable.querySelector('tbody').rows).find(r => 
+            //「食品番号」が一致しており、かつ……
               r.cells[1].textContent.trim() === fNum && 
+              //「食品名」も一致している行を特定し、sourceRow に保存します。
               r.cells[2].textContent.trim() === fName
             );
             
+            //もし、元ネタの表の中にその食品が見つかった（献立に使用予定がある）場合は、次へ進みます。
             if (sourceRow) {
+              //計算結果を書き込む先の表（抽出表）を特定します。
               const targetTableElement = document.getElementById(target.id);
+              //抽出結果を書き込む先の表の、データ入力エリア（tbody）を特定します。
               const tbody = targetTableElement.querySelector('tbody');
               
+              //その食品の各規格（10kg, 5kg...など）ごとに、1行ずつ結果を作っていくためのループを開始します。
               formats.forEach(fmt => {
+                //抽出表の中に、結果を書き込むための新しい空の行を作成します。
                 const tr = createBlankRow(targetTableElement);
+                //新しい行の2番目のマスに「食品番号」を書き込みます。
                 tr.cells[1].textContent = fNum;
+                //3番目のマスに「食品名」を書き込みます。
                 tr.cells[2].textContent = fName;
+                //4番目のマスに、今計算している「規格（袋のサイズ）」を書き込みます。
                 tr.cells[3].textContent = fmt;
 
+                //その月の「合計袋数」を数えるためのカウンターを0で用意します。
                 let rowSum = 0; 
+                //1日から31日まで（3番目から33番目のセル）を一つずつチェックするループを開始します。
                 for (let d = 3; d <= 33; d++) {
+                  //元ネタの表から「1人分の使用量」を読み取ります。
                   const unitUsage = parseFloat(sourceRow.cells[d].textContent) || 0;
+                  //「1人分」に「学校の人数」を掛け算して、その日の「全校生徒の使用量」を算出します。
                   const totalUsage = unitUsage * target.people;
 
+                  //その日の全員分の使用量が0より大きい（＝献立がある）場合にのみ、以下の計算を実行します。
                   if (totalUsage > 0) {
+                    //定義されている「袋の組み合わせマシーン」を使い、
+                    // 使用量を満たしつつ余りが最も少ない「袋の組み合わせ」を割り出します。
                     const bestCombo = findBestCombination(totalUsage, formats);
+                    //割り出された組み合わせの中から、今計算している「特定の規格（例：10kg）」が何袋必要になったかを取り出します。
                     const count = bestCombo[fmt] || 0;
+                    //抽出表の該当する日のマスに、計算された「袋の数」を書き込みます。0袋なら空欄にします。
                     tr.cells[d + 1].textContent = count > 0 ? count : '';
+                    //その月の「合計袋数」に、今日使った袋数を加算します。
                     rowSum += count; 
                   }
                 }
                 
+                //抽出表の右から2番目にある「最大納品数（合計袋数）」の列の場所を特定します。
                 const lastCellIndex = tr.cells.length - 2;
+                //その行の1か月の「合計袋数」を書き込みます。
                 tr.cells[lastCellIndex].textContent = rowSum > 0 ? rowSum : '';
 
+                //前の行で作ったものと同じ「学校・食品・規格」を特定する合言葉（キー）を作成します。
                 const key = `${target.school}_${fNum}_${fmt}`;
+                //プログラムが記憶している、現在の在庫数を取り出します
                 const currentStock = runningInventory[key] || 0;
                 
+                //その月に「減数（返品など）」や「廃棄」された袋の数を合計するためのカウンターを0で用意します。
                 let gensuHaki = 0;
+                //もし「3. 食品減数データ」の表が存在していれば、中身をチェックしに行きます。
                 if (reductionTable) {
+                  //減数表の中から、今計算している「食品番号」と「規格」が一致する行を探し出します。以下の行へと条件が続きます。
                   const redRow = Array.from(reductionTable.querySelector('tbody').rows).find(r => 
-                    r.cells[1].textContent.trim() === fNum && 
+                  //  食品番号が一致しており、かつ……
+                  r.cells[1].textContent.trim() === fNum && 
+                  //4番目のマス（規格）に書かれた数字が、今計算中の規格（10kgなど）と同じ行を特定します。
                     parseFloat(r.cells[3].textContent) === fmt
                   );
+                  //減数表に該当するデータが見つかった場合、以下の計算をします。
                   if (redRow) {
+                    //何か月目のデータを見るかによって、読み取る列の位置（ズレ）を計算します。
                     const colOffset = (target.month - 1) * 2;
+                    //減数表から、該当する月の「減数」の数字を読み取ります。
                     const gensu = parseFloat(redRow.cells[4 + colOffset].textContent) || 0;
+                    //同じく、該当する月の「廃棄」の数字を読み取ります。
                     const haki = parseFloat(redRow.cells[5 + colOffset].textContent) || 0;
+                    //減数と廃棄を足して、その月に「使わずに在庫から消えた分」を確定させます。
                     gensuHaki = gensu + haki;
                   }
                 }
 
+                //翌月の在庫を計算します。現在の在庫（currentStock）に、納品されたはずの袋数rowSum）を足し、
+                // そこから「減数・廃棄（gensuHaki）」と「実際に使った袋数（rowSum）」を差し引きます。
+                // ※計算上、納品と使用が同じ袋数（rowSum）であるため、実質的には「在庫 - 減数・廃棄」の結果が nextStock になります。
                 const nextStock = currentStock + rowSum - gensuHaki - rowSum;
+                //計算された「翌月のスタート在庫」を、一時記録所に上書き保存します。
+                // これで次の月（2か月目や3か月目）の計算に、この数字が引き継がれます。
                 runningInventory[key] = nextStock;
+                //抽出表の一番右端のマス（在庫予測）に、今計算した在庫数を書き込みます。
                 tr.cells[tr.cells.length - 1].textContent = nextStock;
-                
+                //数字がすべて埋まった「結果の1行」を、抽出表の本体（tbody）にカチッとはめ込み、画面に表示させます
                 tbody.appendChild(tr);
               });
+              //書き出された行に対して、No.を 1, 2, 3... ときれいに振り直します。
               renumberTable(tbody);
             }
           });
         });
+        //すべての計算と書き出しが終わったことを、画面上のメッセージでユーザーに知らせます。
         alert('使い切り抽出および在庫予測の計算が完了しました。');
       });
 
+      //第一引数に「必要量（usage）」、第二引数に「規格リスト（formats）」を受け取り、
+      // 最適な組み合わせを計算する関数を開始します。
       function findBestCombination(usage, formats) {
+        //規格の合計値と usage との差（余り）を比較するための変数です。初期値は無限大（Infinity）です。
         let minDiff = Infinity;
+        //差が同じ場合に、個数の合計がより少ない方を優先するための変数です。初期値は無限大です。
         let minItems = Infinity;
+        //最終的な「どの規格を何個使うか」という結果を保存するための空のオブジェクトを用意します
         let bestResult = {};
 
+        //全パターンを網羅するための再帰関数 backtrack を定義します
         function backtrack(index, currentCounts, currentWeight) {
+          //index が formats の要素数に達した（すべての規格を検討した）場合に判定を行います。
           if (index === formats.length) {
+            //現在の合計重量（currentWeight）が usage 以上である場合のみ、次へ進みます。
             if (currentWeight >= usage) {
+              //合計重量から usage を引いた「差（diff）」を算出します。
               const diff = currentWeight - usage;
+              //現在の組み合わせにおける個数の総計（items）を計算します。
               const items = Object.values(currentCounts).reduce((a, b) => a + b, 0);
+              //差が最小である、または差が同じで個数がより少ない場合に、最善の結果として採用します。
               if (diff < minDiff || (diff === minDiff && items < minItems)) {
+                //minDiff の値を更新します。
                 minDiff = diff;
+                //minItems の値を更新します。
                 minItems = items;
+                //現在の currentCounts の内容を bestResult にコピーして保存します。
                 bestResult = { ...currentCounts };
               }
             }
+            //現在の再帰処理を終了し、呼び出し元に戻ります。
             return;
           }
+          //formats リストの index 番目にある規格（fmt）を取り出します。
           const fmt = formats[index];
+          //その規格を用いる最大個数（usageをfmtで割って切り上げ、さらに+1した値）を計算します。
           const maxCount = Math.ceil(usage / fmt) + 1;
+          //その規格の個数（i）を0から maxCount まで増分させるループを開始します。
           for (let i = 0; i <= maxCount; i++) {
+            //現在の規格 fmt に対する個数 i を currentCounts に記録します。
             currentCounts[fmt] = i;
+            //次の規格を検討するため、index を進め、重量に fmt * i を加算して再帰呼び出しを行います
             backtrack(index + 1, currentCounts, currentWeight + (fmt * i));
+            //合計重量が「usage ＋ formatsの最小値」を超過した場合、これ以上の増分は不要なためループを中断（break）します。
             if (currentWeight + (fmt * i) > usage + formats[formats.length-1]) break;
           }
         }
+        //引数 0, {}, 0 を渡し、最初の規格から計算を開始させます。
         backtrack(0, {}, 0);
+        //計算の結果得られた bestResult を返します。
         return bestResult;
       }
 
       // --- 保存・共通機能 ---
+
+      //画面内のすべてのテーブルデータと入力値を一つのオブジェクトにまとめる関数を開始します。
       function collectAllData() {
+        //データを格納するための空のオブジェクト（allData）を用意します。
         const allData = {};
+        //ページ内にあるすべての <table> 要素に対して、一つずつ以下の処理を繰り返します。
         document.querySelectorAll('table').forEach(table => {
+          //そのテーブルの各行のデータを保存するための空の配列（rows）を用意します。
           const rows = [];
+          //テーブルの <tbody> 内にあるすべての行（<tr>）に対して処理を繰り返します。
           table.querySelectorAll('tbody tr').forEach(tr => {
+            //各行の全セル（<td>）からテキスト内容を取り出し、配列として rows に追加します。
             rows.push(Array.from(tr.cells).map(td => td.textContent));
           });
+          //allData オブジェクトの中に、テーブルのIDを名前（キー）にして、そのデータを保存します。
           allData[table.id] = rows;
         });
+        //allData に「people_counts」という名前で、人数設定を保存する枠組みを作ります。
         allData['people_counts'] = {
+          //「学校1の人数」の入力値を保存します。
           s1: document.getElementById('input-people-s1').value,
+          //「学校2の人数」の入力値を保存します。
           s2: document.getElementById('input-people-s2').value
         };
+        //収集したすべてのデータが入った allData を返します。
         return allData;
       }
 
+      //引数で受け取ったデータ（allData）を、実際の画面上の各テーブルに反映させる関数を開始します
       function applyDataToTables(allData) {
+        //もしデータの中に「people_counts（人数設定）」が含まれていれば、次へ進みます。
         if(allData.people_counts) {
+          //「学校1の人数」の入力欄にデータを復元します。
           document.getElementById('input-people-s1').value = allData.people_counts.s1;
+          //「学校2の人数」の入力欄にデータを復元します。
           document.getElementById('input-people-s2').value = allData.people_counts.s2;
         }
+        //allData に入っているデータの名前（テーブルIDなど）を一つずつ取り出してループ処理します。
         for (const tableId in allData) {
+          //「people_counts」はテーブルではないため、ここではスキップして次のデータへ進みます。
           if (tableId === 'people_counts') continue;
+          //データの名前と一致するIDを持つテーブルを画面上から探し出します。
           const table = document.getElementById(tableId);
+          //もし、データにあるIDを持つテーブルが現在の画面上に見つからなかった場合は、
+          // そのデータの処理を飛ばして次へ進みます。
           if (!table) continue;
+          //データを流し込む先である、テーブルの <tbody> 要素を特定します。
           const tbody = table.querySelector('tbody');
+          //新しいデータを書き込む前に、現在表示されているテーブルの中身をすべて消去して空にします。
           tbody.innerHTML = ''; 
+          //保存されていた各行のデータ（rowData）に対して、一行ずつ復元処理を繰り返します。
           allData[tableId].forEach(rowData => {
+            //createBlankRow 関数を使い、適切な列数を持つ新しい空の行（<tr>）を作成します。
             const tr = createBlankRow(null, rowData.length);
+            //1行の中にある各セルのテキストデータ（text）と、その列番号（colIdx）を一つずつ処理します。
             rowData.forEach((text, colIdx) => {
+              //もし0番目（No.列）以外のセルであれば、ユーザーが直接編集できるように設定し、改行禁止のルールも適用します。
               if (colIdx !== 0) { tr.cells[colIdx].setAttribute('contenteditable', 'true'); tr.cells[colIdx].addEventListener('keydown', disableNewLine); }
+              //0番目（No.列）のセルであれば、ユーザーが勝手に書き換えられないよう編集不可に設定します。
               else { tr.cells[colIdx].setAttribute('contenteditable', 'false'); }
+              //セルの内容に、保存されていたテキストデータを流し込みます。
               tr.cells[colIdx].textContent = text;
             });
+            //完成した1行を、テーブルの <tbody> に追加して画面に表示させます。
             tbody.appendChild(tr);
           });
         }
       }
 
+      //「一時保存」ボタンを押した時、collectAllData で集めた全データを文字列に変換し、ブラウザの localStorage（保存領域）へ gensu_app_data という名前で記録します。
       document.getElementById('btn-save').addEventListener('click', () => { localStorage.setItem('gensu_app_data', JSON.stringify(collectAllData())); alert('一時保存しました。'); });
+      //「復元」ボタンを押した時、ブラウザから保存データを読み取り、データがあれば applyDataToTables を使って画面の表を元の状態に書き戻します。
       document.getElementById('btn-load').addEventListener('click', () => { const saved = localStorage.getItem('gensu_app_data'); if (saved) applyDataToTables(JSON.parse(saved)); alert('復元しました。'); });
+      //「JSON出力」ボタンがクリックされた時の処理を開始します。
       document.getElementById('btn-json-export').addEventListener('click', () => {
+        //現在画面に入力されているすべてのデータを collectAllData で取得します。
         const data = collectAllData();
+        //取得したデータを、読みやすい形式（インデント付き）のJSON文字列にし、それを「ファイル」として扱うためのデータ（Blob）に変換します。
         const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        //画面には見えない「リンク（<a>要素）」を一時的に作成し、そこに先ほどのJSONファイルデータの所在（URL）をセットします。
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        //ファイル名に現在時刻を付けてダウンロード用として設定し、自動的にクリックさせることで、パソコンへファイルを保存させます。
         a.download = `gensu_data_${new Date().getTime()}.json`; a.click();
       });
+      //画面上の「読込（ファイル選択）」ボタンが押された際、実際には隠されているファイル選択用の入力欄（<input type="file">）を代わりにクリックさせます。
       document.getElementById('btn-json-import-trigger').addEventListener('click', () => document.getElementById('input-json-file').click());
+      //ファイル選択欄で実際にファイルが選ばれた瞬間に動く処理を開始します。
       document.getElementById('input-json-file').addEventListener('change', (e) => {
+        //ブラウザ上でファイルの中身を読み取るための専用ツール（FileReader）を新しく用意します。
         const reader = new FileReader();
+        //ファイルの読み取りが完了した瞬間に動く処理です。中身（JSON文字列）を解析してデータに戻し、
+        // applyDataToTables を使って画面の各表を更新し、完了通知を出します。
         reader.onload = (event) => { applyDataToTables(JSON.parse(event.target.result)); alert('読込完了'); };
+        //実際に、選択された1番目のファイルを「テキストデータ」として読み込み開始させます。
         reader.readAsText(e.target.files[0]);
       });
+      //「全消去」ボタンが押された時、確認メッセージを出した上で、ページを再読み込み（リロード）してすべての入力をリセットします。
       document.getElementById('btn-clear').addEventListener('click', () => { if (confirm('全消去しますか？')) location.reload(); });
+      //「重量計算」ボタンが押された時、後述する重量計算のメイン処理（triggerWeightCalculation）を実行し、完了通知を出します。
       document.getElementById('btn-calc-weight').addEventListener('click', () => { triggerWeightCalculation(); alert('重量計算完了'); });
+      //「開封計算」ボタンが押された時、重量計算と開封計算をセットで行うメイン処理（runOpeningCalculation）を実行し、完了通知を出します。
       document.getElementById('btn-calc-open').addEventListener('click', () => { runOpeningCalculation(); alert('重量・開封計算完了'); });
 
+      //学校ごとの人数設定を読み取り、すべての月に対して重量計算を開始させる関数を定義します。
       function triggerWeightCalculation() {
+        //画面上の「学校1の人数」の入力値を、計算可能な数値として取得します（空欄なら0）。
         const p1 = parseFloat(document.getElementById('input-people-s1').value) || 0;
+        //画面上の「学校2の人数」の入力値を、計算可能な数値として取得します（空欄なら0）。
         const p2 = parseFloat(document.getElementById('input-people-s2').value) || 0;
+        //1か月目から3か月目までをループで回し、「学校1」と「学校2」のそれぞれに対して、
+        // 後述する重量計算のメイン機能（runWeightCalc）を実行します。
         for (let m = 1; m <= 3; m++) { runWeightCalc('学校1', m, p1); runWeightCalc('学校2', m, p2); }
       }
 
+      //指定された「学校・月・人数」に基づいて、実際に表の数値を掛け算する関数を定義します。
       function runWeightCalc(school, month, people) {
+        //引数の学校名が「学校1」なら school1、「学校2」なら school2 というIDの一部に変換します。
         const idBase = school === '学校1' ? 'school1' : 'school2';
+        //元データとなる「1人分使用量」のテーブルを特定します。
         const singleTable = document.getElementById(`usage-${idBase}-month${month}-single`);
+        //計算結果を書き込む「全校使用量」のテーブルを特定します。
         const totalTable = document.getElementById(`usage-${idBase}-month${month}-total`);
+        //もしどちらかのテーブルが画面上に見つからなければ、その月の計算を中断して戻ります。
         if (!singleTable || !totalTable) return;
+        //元データの行（sRows）と、書き込み先の本体（tBody）をそれぞれ取得します。
         const sRows = singleTable.querySelector('tbody').rows, tBody = totalTable.querySelector('tbody');
+        //計算結果を新しく作り直すため、書き込み先のテーブルの中身を一旦すべて消去して空にします。
         tBody.innerHTML = '';
+        //元データのテーブルにある各行に対して、一行ずつ以下の計算を繰り返します。
         Array.from(sRows).forEach((sRow) => {
+          //書き込み先のテーブルの形式に合わせた、新しい空の行を作成します
           const tRow = createBlankRow(totalTable);
+          //元データの2番目のセルから「食品番号」をコピーして、新しい行に貼り付けます。
           tRow.cells[1].textContent = sRow.cells[1].textContent; 
+          //元データの3番目のセルから「食品名」をコピーして、新しい行の同じ位置に貼り付けます。
           tRow.cells[2].textContent = sRow.cells[2].textContent;
+          //4番目のセル（1日の列）から、その行の最後のセルまでを一つずつ処理するループを開始します
           for (let d = 3; d < sRow.cells.length; d++) {
+            //「1人分使用量」のセルの数字を読み取ります。数字が入っていない、または文字が含まれる場合は 0 とみなします。
             const val = parseFloat(sRow.cells[d].textContent) || 0;
+            //読み取った「1人分」に、先ほど取得した「学校の人数（people）」を掛け算して、全校生徒分の総重量を算出します。
             const res = val * people;
+            //計算結果が 0 より大きい場合のみ、小数点第一位まで（例: 125.5）に整えてセルに書き込みます。
+            // 0 の場合は見やすくするために空欄にします。
             tRow.cells[d].textContent = res > 0 ? res.toFixed(1) : '';
           }
+          //全日付の計算が終わった「完成した1行」を、書き込み先テーブルの本体（tBody）に追加して画面に表示させます。
           tBody.appendChild(tRow);
         });
+        //書き出されたすべての行に対して、No.を 1, 2, 3... と正しい連番で振り直します。
         renumberTable(tBody);
       }
 
+      //重量計算の結果をもとに、実際の「開封数（袋数）」と「在庫予測」を導き出すメイン関数を開始します。
       function runOpeningCalculation() {
+        //開封数を出す前に、まずは最新の人数設定で「総重量」を最新の状態に更新（関数を呼び出し）します。
         triggerWeightCalculation();
+        //計算対象の「学校リスト」と、規格やカテゴリーが載っている「1. 食品データベース」を特定します。
         const schools = ['学校1', '学校2'], dbTable = document.getElementById('food-database');
+        //データベースの表が見つからなければ、計算不能のため中断します。
         if (!dbTable) return;
+        //データベースにある全ての行（食品データ）を、検索しやすいように配列にまとめます。
         const dbRows = Array.from(dbTable.querySelector('tbody').rows);
+        //「学校1」と「学校2」のそれぞれに対して、以下の処理を順番に実行します。
         schools.forEach(school => {
+          //学校名に対応するIDの基礎（school1 または school2）を決めます。
           const idBase = school === '学校1' ? 'school1' : 'school2';
+          //1か月目から3か月目まで、順に計算を回します。
           for (let m = 1; m <= 3; m++) {
+            //前の処理で作られた「全校使用量（重量）」のテーブルを特定します。
             const totalTable = document.getElementById(`usage-${idBase}-month${m}-total`);
+            //もし対象の月のテーブルがなければ、その月を飛ばして次に進みます。
             if (!totalTable) continue;
+            //テーブルの本体（tBody）と、そこに含まれる全行（食品）を特定します。
             const tBody = totalTable.querySelector('tbody'), rows = Array.from(tBody.rows);
+            //各行を下から上に向かって順番にチェックしていきます（削除処理があるため後ろから回します）。
             for (let i = rows.length - 1; i >= 0; i--) {
+              //その行の「食品番号」を読み取ります。
               const fNum = rows[i].cells[1].textContent.trim();
+              //その行の「食品名」を読み取ります。
               const fName = rows[i].cells[2].textContent.trim();
+              //データベースの中から、同じ食品番号・食品名を持つデータ（規格やカテゴリー情報）を探し出します。
               const dbMatch = dbRows.find(r => r.cells[1].textContent.trim() === fNum && r.cells[2].textContent.trim() === fName);
+              //データベースの7番目のセルから、その食品の「カテゴリー（通常、個数、使い切り）」を取得します。
               const category = dbMatch ? dbMatch.cells[6].textContent.trim() : "";
+              //カテゴリーが「通常」でも「個数」でもない場合（＝使い切りの場合）、この表からは行を削除します
               if (category !== "通常" && category !== "個数") tBody.deleteRow(i);
             }
+            //カテゴリー外の行を削除した後のテーブルに対して、No.を 1, 2, 3... と正しく振り直します。
             renumberTable(tBody);
           }
+          //「2. 在庫データ」のテーブルを特定します。
           const inventoryTable = document.getElementById(`inventory-${idBase}`);
+          //「3. 食品減数データ」のテーブルを特定します。
           const reductionTable = document.getElementById(`reduction-${idBase}`); 
+          //在庫データのテーブルが見つからない場合は、以降の計算ができないため処理を中断します。
           if (!inventoryTable) return;
+          //在庫データにある全行を配列として取得します。
           const invRows = Array.from(inventoryTable.querySelector('tbody').rows);
+          //在庫表の各行（食品ごと）に対して、以下の計算を繰り返します。
           invRows.forEach(invRow => {
+            //在庫表から「食品番号」と「食品名」を読み取ります。
             const foodNum = invRow.cells[1].textContent.trim(), foodName = invRow.cells[2].textContent.trim();
+            //データベース（1. 食品データベース）から、一致する食品の情報を探し出します。
             const dbData = dbRows.find(r => r.cells[1].textContent.trim() === foodNum && r.cells[2].textContent.trim() === foodName);
+            //データベースにその食品が登録されていない場合は、計算をスキップします。
             if (!dbData) return;
+            //データベースから「規格1（1袋の量）」と「カテゴリー」を読み取ります。
             const kikaku1 = parseFloat(dbData.cells[3].textContent) || 0, category = dbData.cells[6].textContent.trim();
+            //カテゴリーが「通常」または「個数」である場合のみ、以下の開封パズル計算を実行します。
             if (category === "通常" || category === "個数") {
+              //規格1（袋のサイズ）が0以下の場合は計算不能なため、スキップします。
               if (kikaku1 <= 0) return;
               
+              //在庫表の「端数残量（使いかけの量）」を読み取り、計算用の変数 hasuZanryoVar にセットします。
+              // これが計算のスタート地点になります。
               let hasuZanryoVar = parseFloat(invRow.cells[6].textContent) || 0;
+              //在庫表の4番目のセルから「未開封在庫数」を読み取り、計算用の変数 stockUnopenedVar にセットします。
               let stockUnopenedVar = parseFloat(invRow.cells[3].textContent) || 0; 
 
+              //1か月目から3か月目まで、順番に開封計算を回していきます。
               for (let m = 1; m <= 3; m++) {
+                //計算結果を書き込む先の「全校使用量」テーブルを特定します。
                 const totalTable = document.getElementById(`usage-${idBase}-month${m}-total`);
+                //対象の月のテーブルが見つからなければ、次の月へ進みます。
                 if (!totalTable) continue;
+                //書き込み先テーブルの中から、今計算している食品番号と一致する行を探し出します。
                 const targetRow = Array.from(totalTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === foodNum);
+                //もし書き込み先にその食品の行がなければ、計算をスキップします。
                 if (!targetRow) continue;
                 
+                //その月の「合計開封数」と「合計使用重量」を記録するための変数を0でリセットします。
                 let monthlyKaifuuTotal = 0, monthlyUsageTotal = 0;
+                //1日から31日までの各列（セル）に対して、1日ずつ順番に計算を行います。
                 for (let d = 3; d <= 33; d++) {
+                  //その日の「使用重量（総重量）」を数値として読み取ります。
                   let shiyoryo = parseFloat(targetRow.cells[d].textContent) || 0;
+                  //その日の使用量を、月の合計重量に加算します。
                   monthlyUsageTotal += shiyoryo;
+                  //「今日の使用量」から「前日からの使いかけ（端数）」を引き、足りない分（fusokubun）を算出します。
                   let fusokubun = shiyoryo - hasuZanryoVar, dailyKaifuusu = 0;
+                  //もし足りなければ、規格1のサイズで何袋開ける必要があるかを計算（繰り上げ）し、新しく出た端数を hasuZanryoVar に保存します。
                   if (fusokubun > 0) { dailyKaifuusu = Math.ceil(fusokubun / kikaku1); hasuZanryoVar = (dailyKaifuusu * kikaku1) - fusokubun; }
+                  //もし端数だけで足りるなら、新しく袋は開けず（0）、使った分だけ端数を減らします。
                   else { dailyKaifuusu = 0; hasuZanryoVar = hasuZanryoVar - shiyoryo; }
+                  //計算した「今日の開封数」をセルに書き込みます。使用量があるのに開封不要なら「0」、使用量自体がなければ空欄にします。
                   targetRow.cells[d].textContent = dailyKaifuusu > 0 ? dailyKaifuusu : (shiyoryo > 0 ? 0 : '');
+                  //今日の開封数を、月の合計開封数に加算します。
                   monthlyKaifuuTotal += dailyKaifuusu;
                 }
                 
+                //月の総使用量を規格1で割り、その月に「最低限納品してもらうべき数（納品目安）」を計算します。
                 const maxDelivery = Math.ceil(monthlyUsageTotal / kikaku1);
+                //計算した「納品目安（総使用量÷規格1）」を、35番目のセルに書き込みます。
                 targetRow.cells[34].textContent = maxDelivery;
+                //その月に実際に開封した袋の合計数を、36番目のセルに書き込みます。
                 targetRow.cells[35].textContent = monthlyKaifuuTotal;
 
+                //その月の「減数（返品）」や「破棄」による在庫減少量の合計を入れる変数を、0で用意します。
                 let monthlyGensuHaki = 0;
+                //「3. 食品減数データ」のテーブルが存在する場合のみ、以下の処理を行います。
                 if (reductionTable) {
+                  //減数テーブルの中から、今計算している食品番号と同じ行を探します。
                   const redRow = Array.from(reductionTable.querySelector('tbody').rows).find(r => r.cells[1].textContent.trim() === foodNum);
+                  //減数データに行が見つかった場合の処理です。
                   if (redRow) {
+                    //月（m）に合わせて、読み取るべき列の位置（1月目なら0、2月目なら2...）を計算します。
                     const colOffset = (m - 1) * 2;
+                    //指定された月の「減数」の値を数値として読み取ります。
                     const gensu = parseFloat(redRow.cells[4 + colOffset].textContent) || 0;
+                    //指定された月の「破棄」の値を数値として読み取ります。
                     const haki = parseFloat(redRow.cells[5 + colOffset].textContent) || 0;
+                    //その月の在庫から差し引くべき「減数＋破棄」の合計を出します。
                     monthlyGensuHaki = gensu + haki;
                   }
                 }
 
+                //次の月へ引き継ぐ「未開封在庫数」を計算します。
+                // 「前の在庫 ＋ 納品数 ー 開封数 ー 減数・破棄」という式で算出します。
                 stockUnopenedVar = stockUnopenedVar + maxDelivery - monthlyKaifuuTotal - monthlyGensuHaki;
                 
+                //計算結果の「月末在庫（未開封）」を、37番目のセルに書き込みます。
                 targetRow.cells[36].textContent = stockUnopenedVar;
+                //その月の計算が終わった時点での「使いかけの量（端数）」を、
+                // 小数点第一位まで（例: 0.5）にして38番目のセルに書き込みます。これが翌月の計算のスタート値になります。
                 targetRow.cells[37].textContent = hasuZanryoVar.toFixed(1);
               }
             }
